@@ -170,15 +170,36 @@ ARIES <- raw_ARIES %>%
     ) %>%
     # Consolidate pedestrian-involvement variables
     mutate(
-        pedestrian_involved = if_else(
+        ped_involved = if_else(
             PERSONTYPEDESCR %in% "Pedestrian" | COLLEVENTDESCR %in% "Pedestrian",
             TRUE,
             FALSE
         )
     )
 
+rm(raw_ARIES)
+
 glimpse(ARIES)
 ```
 
+```{r}
+
+crashes <- ARIES %>%
+    group_by(
+        INDIVIDUAL_MR_RECORD
+    ) %>%
+    summarize(
+        long = first(LONGDECIMALNMB),
+        lat = first(LATDECIMALNMB),
+        date = first(COLLDTE),
+        ped_involved = if_else(
+            any(ped_involved == TRUE),
+            TRUE,
+            FALSE
+        )
+    ) %>%
+    ungroup()
+
+```
 
 
