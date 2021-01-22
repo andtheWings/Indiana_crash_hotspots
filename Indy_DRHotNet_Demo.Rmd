@@ -146,7 +146,7 @@ raw_ARIES <- readr::read_csv("raw_ARIES_2018.csv", col_types = parse_spec)
 glimpse(raw_ARIES)
 ```
 
-```{r Light cleaning}
+```{r Light wrangling}
 
 # Standardize the date format
 raw_ARIES$COLLDTE <- raw_ARIES$COLLDTE %>% ymd() %>% as.character()
@@ -154,7 +154,8 @@ raw_ARIES$COLLDTE <- raw_ARIES$COLLDTE %>% ymd() %>% as.character()
 # Clean the table
 ARIES <- raw_ARIES %>%
     # Delete duplicate rows
-    distinct() %>%
+    distinct(
+    ) %>%
     # Remove rows that don't have a valid latitude, longitude, and date
     filter(
         !is.na(LATDECIMALNMB) & 
@@ -162,8 +163,22 @@ ARIES <- raw_ARIES %>%
         !is.na(COLLDTE) &
         LATDECIMALNMB != 0 & 
         LONGDECIMALNMB != 0
+    ) %>%
+    # Give a unique identifier to each row
+    mutate(
+        true_id = 1:n()
+    ) %>%
+    # Consolidate pedestrian-involvement variables
+    mutate(
+        pedestrian_involved = if_else(
+            PERSONTYPEDESCR %in% "Pedestrian" | COLLEVENTDESCR %in% "Pedestrian",
+            TRUE,
+            FALSE
+        )
     )
 
 glimpse(ARIES)
 ```
+
+
 
