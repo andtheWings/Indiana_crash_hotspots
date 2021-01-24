@@ -9,12 +9,17 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-```{r Libraries}
+```{r Libraries, message=FALSE, warning=FALSE}
 library(tidyverse)
 library(lubridate)
+library(sf)
+library(mapdeck)
+library(maptools)
+library(SpNetPrep)
+library(spatstat)
 ```
 
-```{r Download 2018 dataset}
+```{r Download 2018 ARIES dataset}
 
 download.file(
     url = "https://hub.mph.in.gov/dataset/4ac55064-1f0d-4e5e-aeee-12faf28d6175/resource/cc90589c-72d8-4d92-a5fe-73254b555c73/download/aries_crash_data_2018.csv",
@@ -138,7 +143,6 @@ parse_spec <- cols(
 
 ```
 
-
 ```{r Parse the raw data}
 
 raw_ARIES <- readr::read_csv("raw_ARIES_2018.csv", col_types = parse_spec)
@@ -149,7 +153,9 @@ glimpse(raw_ARIES)
 ```{r Light wrangling}
 
 # Standardize the date format
-raw_ARIES$COLLDTE <- raw_ARIES$COLLDTE %>% ymd() %>% as.character()
+raw_ARIES$COLLDTE <- raw_ARIES$COLLDTE %>% 
+    lubridate::ymd() %>% 
+    as.character()
 
 # Clean the table
 ARIES <- raw_ARIES %>%
@@ -167,7 +173,14 @@ ARIES <- raw_ARIES %>%
     # Give a unique identifier to each row
     mutate(
         true_id = 1:n()
-    ) %>%
+    )
+
+glimpse(ARIES)
+```
+
+```{r Wrangling crash records}
+
+ARIES %>%
     # Consolidate pedestrian-involvement variables
     mutate(
         ped_involved = if_else(
@@ -175,22 +188,15 @@ ARIES <- raw_ARIES %>%
             TRUE,
             FALSE
         )
-    )
-
-rm(raw_ARIES)
-
-glimpse(ARIES)
-```
-
-```{r}
-
-crashes <- ARIES %>%
+    ) %>%
+    # Group by identifier for each crash event
     group_by(
         INDIVIDUAL_MR_RECORD
     ) %>%
+    # Consolidate each group of individuals involved in a crash event into one record
     summarize(
-        long = first(LONGDECIMALNMB),
-        lat = first(LATDECIMALNMB),
+        longitude = first(LONGDECIMALNMB),
+        latitude = first(LATDECIMALNMB),
         date = first(COLLDTE),
         ped_involved = if_else(
             any(ped_involved == TRUE),
@@ -198,8 +204,81 @@ crashes <- ARIES %>%
             FALSE
         )
     ) %>%
-    ungroup()
+    ungroup(
+    ) %>%
+    # Convert the format to simple feature collection--one of the standard formats for geographic analysis in R
+    st_as_sf(
+        coords = c("longitude","latitude"),
+        crs = 4326
+    ) -> crashes
+
+glimpse(crashes)
+```
+
+```{r Subset to Marion County Crashes}
+st_read("https://opendata.arcgis.com/datasets/4ff11b4054d84cb2ad3513f228624d2b_9.geojson") -> marion_boundary
+
+st_intersects(crashes, marion_boundary, sparse = FALSE) -> in_marion
+
+crashes %>% filter(in_marion == TRUE) -> marion_crashes
 
 ```
 
+```{r Interactive Heatmap}
+mapdeck::set_token("pk.eyJ1IjoiZGFucmlnZ2lucyIsImEiOiJVUjd1NnRJIn0.lqlMQwXYjt6R2heJOYo_sw")
+
+base_map <- mapdeck(
+    style = "mapbox://styles/mapbox/dark-v10",
+    location = c(-86.15801704875246, 39.768569808746264),
+    zoom = 10,
+    pitch = 25
+)
+
+base_map %>%
+    add_heatmap(
+        data = (crashes %>% filter(ped_involved == TRUE)),
+    )
+
+```
+
+```{r}
+st_read("https://opendata.arcgis.com/datasets/fa9ec663cf25407a9b7645ff14334a7f_13.geojson") -> marion_streets
+
+marion_streets %>%
+  # Transform onto local Indiana map projection
+  st_transform(crs = 7327) %>%
+  # Convert to spatial format to enable conversion to...
+  as_Spatial() %>% 
+  # ...linear network format
+  as.linnet() %>%
+  # Break linear network into a list of its disconnected components
+  connected(what = "components") -> street_components.linnet
+
+# Select for only the largest, continuous component of the network
+street_components.linnet[[1]] -> continuous_streets.linnet
+
+```
+
+```{r}
+continuous_streets.linnet %>%
+  # Simplify the number of redundant segments
+  SpNetPrep::SimplifyLinearNetwork(Angle = 20, Length = 50) -> simplified_continuous_streets.linnet
+```
+
+```{r}
+marion_crashes %>%
+  # Transform to local Indiana map projection
+  st_transform(7327) %>%
+  # Convert to spatial format to enable conversion to...
+  as_Spatial() %>%
+  # Planar point pattern format
+  as.ppp() -> marion_crashes.ppp
+
+simplified_continuous_streets.linnet %>% 
+  # Convert to complementary planar segment pattern
+  as.psp.linnet() -> simplified_continuous_streets.psp
+
+spatstat
+  
+```
 
