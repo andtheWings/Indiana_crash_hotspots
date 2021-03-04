@@ -1,7 +1,7 @@
 ---
-title: "Indianapolis DRHotNet Demo"
+title: "Indiana Crash Hotspots"
 author: "Daniel P. Riggins"
-date: "1/22/2021"
+date: "March 3rd, 2021"
 output: html_document
 ---
 
@@ -9,61 +9,26 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-```{r Dependencies, message=FALSE, warning=FALSE}
-install.packages(c("devtools", "tidyverse"))
+```{r Dependencies, message=FALSE, warning=FALSE, include=FALSE}
 devtools::install_github("andtheWings/IndyCrash")
 library(IndyCrash)
 library(tidyverse)
 library(lubridate)
 library(sf)
 library(mapdeck)
-library(maptools)
-library(SpNetPrep)
-library(spatstat)
 ```
 
-```{r Parse the raw data}
+```{r Data wrangling, include=FALSE}
 
-raw_ARIES <- IndyCrash::read_ARIES_csv("raw_ARIES_2018.csv")
+# Parse crash data
+raw_crashes <- IndyCrash::read_ARIES_csv("crash-data-2018.csv")
 
-```
-
-```{r Light wrangling}
-
-
-clean_data <- function(df) {
-    df %>%
-    standardize_ARIES_dates() %>%
-    # Delete duplicate rows
-    distinct() %>%
-    # Remove rows that don't have a valid latitude, longitude, and date
-    filter(
-        !is.na(LATDECIMALNMB) & 
-        !is.na(LONGDECIMALNMB) &
-        !is.na(COLLDTE) &
-        LATDECIMALNMB != 0 & 
-        LONGDECIMALNMB != 0
-    ) %>%
-    # Give a unique identifier to each row
-    mutate(
-        true_id = 1:n()
-    )
-}
-
-
-test <- clean_data(raw_ARIES)
-
-glimpse(test_core_crash_clean)
-```
-
-```{r}
 # Standardize the date format
-raw_ARIES$COLLDTE <- raw_ARIES$COLLDTE %>% 
+raw_crashes$COLLDTE <- raw_crashes$COLLDTE %>% 
     lubridate::ymd() %>% 
     as.character()
 
-# Clean the table
-ARIES <- raw_ARIES %>%
+crashes <- raw_crashes %>%
     # Delete duplicate rows
     distinct() %>%
     # Remove rows that don't have a valid latitude, longitude, and date
@@ -73,18 +38,11 @@ ARIES <- raw_ARIES %>%
         !is.na(COLLDTE) &
         LATDECIMALNMB != 0 & 
         LONGDECIMALNMB != 0
-    ) %>%
+    ) %>% 
     # Give a unique identifier to each row
     mutate(
         true_id = 1:n()
-    )
-
-glimpse(ARIES)
-```
-
-```{r Wrangling crash records}
-
-ARIES %>%
+    ) %>%
     # Consolidate pedestrian-involvement variables
     mutate(
         ped_involved = if_else(
@@ -114,73 +72,22 @@ ARIES %>%
     st_as_sf(
         coords = c("longitude","latitude"),
         crs = 4326
-    ) -> crashes
+    )
 
 glimpse(crashes)
 ```
 
-```{r Subset to Marion County Crashes}
-st_read("https://opendata.arcgis.com/datasets/4ff11b4054d84cb2ad3513f228624d2b_9.geojson") -> marion_boundary
-
-st_intersects(crashes, marion_boundary, sparse = FALSE) -> in_marion
-
-crashes %>% filter(in_marion == TRUE) -> marion_crashes
-
-```
-
-```{r Interactive Heatmap}
-mapdeck::set_token("pk.eyJ1IjoiZGFucmlnZ2lucyIsImEiOiJVUjd1NnRJIn0.lqlMQwXYjt6R2heJOYo_sw")
+```{r Interactive Heatmap, echo=FALSE}
+#mapdeck::set_token #Put token here
 
 base_map <- mapdeck(
     style = "mapbox://styles/mapbox/dark-v10",
     location = c(-86.15801704875246, 39.768569808746264),
-    zoom = 10,
+    zoom = 11,
     pitch = 25
 )
 
-base_map %>% mapdeck::add_heatmap(crashes)
+base_map %>% mapdeck::add_heatmap((crashes %>% filter(ped_involved == TRUE)))
     
 
 ```
-
-```{r}
-st_read("https://opendata.arcgis.com/datasets/fa9ec663cf25407a9b7645ff14334a7f_13.geojson") -> marion_streets
-
-marion_streets %>%
-  # Transform onto local Indiana map projection
-  st_transform(crs = 7327) %>%
-  # Convert to spatial format to enable conversion to...
-  as_Spatial() %>% 
-  # ...linear network format
-  as.linnet() %>%
-  # Break linear network into a list of its disconnected components
-  connected(what = "components") -> street_components.linnet
-
-# Select for only the largest, continuous component of the network
-street_components.linnet[[1]] -> continuous_streets.linnet
-
-```
-
-```{r}
-continuous_streets.linnet %>%
-  # Simplify the number of redundant segments
-  SpNetPrep::SimplifyLinearNetwork(Angle = 20, Length = 50) -> simplified_continuous_streets.linnet
-```
-
-```{r}
-marion_crashes %>%
-  # Transform to local Indiana map projection
-  st_transform(7327) %>%
-  # Convert to spatial format to enable conversion to...
-  as_Spatial() %>%
-  # Planar point pattern format
-  as.ppp() -> marion_crashes.ppp
-
-simplified_continuous_streets.linnet %>% 
-  # Convert to complementary planar segment pattern
-  as.psp.linnet() -> simplified_continuous_streets.psp
-
-spatstat
-  
-```
-
